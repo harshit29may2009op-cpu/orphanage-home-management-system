@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS children (
     admission_date DATE,
     class VARCHAR(20),
     school VARCHAR(100),
-    health_status VARCHAR(100)
+    health_status VARCHAR(101)
 );
 
 -- ==============================

@@ -67,6 +67,8 @@ def dashboard(connection):
         ("Children in care", "children"),
         ("Admission applications", "admission_applications"),
         ("Donors", "donors"),
+        ("Parents/guardians", "parents_guardians"),
+        ("Active staff", "staff_members"),
         ("Inventory items", "inventory_items"),
     ]:
         cursor.execute(f"SELECT COUNT(*) FROM {table}")
@@ -142,38 +144,51 @@ def create_application(connection):
     gender = choose_gender()
     received = ask_date("Date received")
     source = ask("Referral source: ")
-    guardian = ask("Parent or guardian display name: ")
+    parent_name = ask("Parent or guardian display name (fictional): ")
     relationship = ask("Relationship to applicant: ")
     contact_ref = ask("Contact reference (use DEMO ONLY; no real number): ")
     cursor = connection.cursor()
     cursor.execute(
+        "INSERT INTO parents_guardians (display_name, contact_reference) "
+        "VALUES (%s, %s)",
+        (parent_name, contact_ref),
+    )
+    parent_id = cursor.lastrowid
+    cursor.execute(
         "INSERT INTO admission_applications "
         "(application_code, applicant_display_name, age_years, gender, received_on, "
-        "referral_source, parent_or_guardian_name, parent_guardian_relationship, "
-        "parent_guardian_contact_reference) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-        (code, applicant, age, gender, received, source, guardian, relationship, contact_ref),
+        "referral_source) VALUES (%s, %s, %s, %s, %s, %s)",
+        (code, applicant, age, gender, received, source),
     )
     application_id = cursor.lastrowid
+    cursor.execute(
+        "INSERT INTO application_parent_links "
+        "(application_id, parent_guardian_id, relationship_to_applicant) "
+        "VALUES (%s, %s, %s)",
+        (application_id, parent_id, relationship),
+    )
     cursor.execute(
         "INSERT INTO application_reviews (application_id, criterion_id) "
         "SELECT %s, criterion_id FROM review_criteria WHERE is_active = TRUE",
         (application_id,),
     )
     connection.commit()
-    print(f"Application {code} saved with {cursor.rowcount} review checklist items.")
+    print(f"Application {code} and separate parent/guardian record saved.")
     print("The system does not calculate eligibility or make placement decisions.")
     cursor.close()
-
 
 def list_applications(connection):
     cursor = connection.cursor()
     cursor.execute(
-        "SELECT application_id, application_code, applicant_display_name, "
-        "received_on, status, parent_guardian_relationship "
-        "FROM admission_applications ORDER BY received_on DESC LIMIT 100"
+        "SELECT aa.application_id, aa.application_code, aa.applicant_display_name, "
+        "aa.received_on, aa.status, pg.display_name, apl.relationship_to_applicant "
+        "FROM admission_applications aa "
+        "LEFT JOIN application_parent_links apl ON aa.application_id=apl.application_id "
+        "LEFT JOIN parents_guardians pg ON apl.parent_guardian_id=pg.parent_guardian_id "
+        "ORDER BY aa.received_on DESC LIMIT 100"
     )
     rows = cursor.fetchall()
-    print("\nID | Code | Applicant | Received | Status | Guardian relationship")
+    print("\nID | Code | Applicant | Received | Status | Parent/guardian | Relationship")
     for row in rows:
         print(" | ".join(str(value or "-") for value in row))
     if not rows:
@@ -380,6 +395,148 @@ def inventory_menu(connection):
     print("Inventory and movement log updated.")
 
 
+def list_staff(connection):
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT staff_id, staff_code, display_name, role_name, is_active "
+        "FROM staff_members ORDER BY staff_id"
+    )
+    rows = cursor.fetchall()
+    print("\nID | Code | Name | Role | Active")
+    for row in rows:
+        print(" | ".join(str(value) for value in row))
+    if not rows:
+        print("No staff records yet.")
+    cursor.close()
+
+
+def manage_staff(connection):
+    while True:
+        print("\nSTAFF MANAGEMENT: 1 Add  2 List  3 Update role/status  0 Back")
+        choice = ask("Choose: ")
+        if choice == "0":
+            return
+        if choice == "1":
+            code = ask("Staff code: ")
+            name = ask("Staff display name (fictional): ")
+            role = ask("Role: ")
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT INTO staff_members (staff_code, display_name, role_name) "
+                "VALUES (%s, %s, %s)",
+                (code, name, role),
+            )
+            connection.commit()
+            print(f"Staff record added with ID {cursor.lastrowid}.")
+            cursor.close()
+        elif choice == "2":
+            list_staff(connection)
+        elif choice == "3":
+            list_staff(connection)
+            staff_id = ask_integer("Staff ID to update: ", 1)
+            role = ask("New role: ")
+            print("  1. Active")
+            print("  2. Inactive")
+            active = ask_integer("Choose status: ", 1, 2) == 1
+            cursor = connection.cursor()
+            cursor.execute(
+                "UPDATE staff_members SET role_name=%s, is_active=%s WHERE staff_id=%s",
+                (role, active, staff_id),
+            )
+            connection.commit()
+            print("Staff record updated." if cursor.rowcount else "Staff ID not found.")
+            cursor.close()
+        else:
+            print("Choose a listed option.")
+
+
+def add_parent_record(connection):
+    name = ask("Parent/guardian display name (fictional): ")
+    contact = ask("Contact reference (use DEMO ONLY; no real number): ")
+    cursor = connection.cursor()
+    cursor.execute(
+        "INSERT INTO parents_guardians (display_name, contact_reference) "
+        "VALUES (%s, %s)",
+        (name, contact),
+    )
+    connection.commit()
+    print(f"Separate parent/guardian record added with ID {cursor.lastrowid}.")
+    cursor.close()
+
+
+def list_parent_records(connection):
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT pg.parent_guardian_id, pg.display_name, pg.contact_reference, "
+        "ch.child_code, cpl.relationship_to_child, cpl.authority_review_status "
+        "FROM parents_guardians pg "
+        "LEFT JOIN child_parent_links cpl "
+        "ON pg.parent_guardian_id=cpl.parent_guardian_id "
+        "LEFT JOIN children ch ON cpl.child_id=ch.child_id "
+        "ORDER BY pg.parent_guardian_id, ch.child_code"
+    )
+    rows = cursor.fetchall()
+    print("\nID | Parent/guardian | Contact reference | Child code | Relationship | Review")
+    for row in rows:
+        print(" | ".join(str(value or "-") for value in row))
+    if not rows:
+        print("No parent/guardian records yet.")
+    cursor.close()
+
+
+def link_parent_to_child(connection):
+    code = ask("Child code: ")
+    cursor = connection.cursor()
+    cursor.execute("SELECT child_id FROM children WHERE child_code=%s", (code,))
+    child = cursor.fetchone()
+    if not child:
+        cursor.close()
+        print("Child code not found.")
+        return
+    cursor.execute(
+        "SELECT parent_guardian_id, display_name FROM parents_guardians "
+        "ORDER BY parent_guardian_id"
+    )
+    parents = cursor.fetchall()
+    for parent_id, name in parents:
+        print(f"{parent_id}. {name}")
+    if not parents:
+        cursor.close()
+        print("Add a parent/guardian record first.")
+        return
+    parent_id = ask_integer("Parent/guardian ID: ", 1)
+    relation = ask("Relationship to child: ")
+    statuses = ["Not reviewed", "Pending review", "Reviewed by authorized person"]
+    for number, status in enumerate(statuses, start=1):
+        print(f"  {number}. {status}")
+    review_status = statuses[ask_integer("Authority-review status: ", 1, 3) - 1]
+    cursor.execute(
+        "INSERT INTO child_parent_links "
+        "(child_id, parent_guardian_id, relationship_to_child, authority_review_status) "
+        "VALUES (%s, %s, %s, %s)",
+        (child[0], parent_id, relation, review_status),
+    )
+    connection.commit()
+    cursor.close()
+    print("Parent/guardian linked to the child.")
+
+
+def manage_parents(connection):
+    while True:
+        print("\nPARENT/GUARDIAN RECORDS: 1 Add  2 List  3 Link to child  0 Back")
+        choice = ask("Choose: ")
+        if choice == "0":
+            return
+        if choice == "1":
+            add_parent_record(connection)
+        elif choice == "2":
+            list_parent_records(connection)
+        elif choice == "3":
+            link_parent_to_child(connection)
+        else:
+            print("Choose a listed option.")
+
+
 def main():
     print("=" * 64)
     print("ORPHANAGE HOME MANAGEMENT — CLASS 12 DEMONSTRATION")
@@ -394,6 +551,7 @@ def main():
                 "\n6 Review checklist / record human decision"
                 "\n7 Add donor  8 Record donation  9 Record expense"
                 "\n10 Add education record  11 Inventory  12 Generate charts"
+                "\n13 Staff management  14 Parent/guardian records"
                 "\n0 Exit"
             )
             choice = ask("Choose an option: ")
@@ -423,6 +581,10 @@ def main():
                 elif choice == "12":
                     for path in generate_charts(connection):
                         print(f"Created {path}")
+                elif choice == "13":
+                    manage_staff(connection)
+                elif choice == "14":
+                    manage_parents(connection)
                 elif choice == "0":
                     break
                 else:

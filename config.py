@@ -19,5 +19,5 @@ def connect_db():
         port=int(os.getenv("DB_PORT", "3306")),
         user=os.getenv("DB_USER", "root"),
         password=password,
-        database=os.getenv("DB_NAME", "orphanage_demo"),
+        database=os.getenv("DB_NAME", "orphanage_class12_demo_v2"),
     )

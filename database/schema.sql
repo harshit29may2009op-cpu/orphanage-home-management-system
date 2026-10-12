@@ -1,8 +1,8 @@
--- Class 12 project: fictional orphanage-home management demo.
--- This schema tracks workflows; it does not decide legal or placement eligibility.
-CREATE DATABASE IF NOT EXISTS orphanage_demo
+-- Revised Class 12 demo schema. Use fictional records only.
+-- Review checklist statuses are workflow tracking, not eligibility decisions.
+CREATE DATABASE IF NOT EXISTS orphanage_class12_demo_v2
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE orphanage_demo;
+USE orphanage_class12_demo_v2;
 
 CREATE TABLE IF NOT EXISTS staff_members (
     staff_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -29,22 +29,24 @@ CREATE TABLE IF NOT EXISTS children (
     INDEX idx_children_gender (gender)
 );
 
-CREATE TABLE IF NOT EXISTS caregivers (
-    caregiver_id INT AUTO_INCREMENT PRIMARY KEY,
+-- Parent/guardian details live separately from child and application records.
+CREATE TABLE IF NOT EXISTS parents_guardians (
+    parent_guardian_id INT AUTO_INCREMENT PRIMARY KEY,
     display_name VARCHAR(100) NOT NULL,
-    relationship_label VARCHAR(50) NOT NULL,
     contact_reference VARCHAR(50) NOT NULL DEFAULT 'NOT RECORDED'
 );
 
-CREATE TABLE IF NOT EXISTS child_caregivers (
+CREATE TABLE IF NOT EXISTS child_parent_links (
     child_id INT NOT NULL,
-    caregiver_id INT NOT NULL,
+    parent_guardian_id INT NOT NULL,
+    relationship_to_child VARCHAR(50) NOT NULL,
     authority_review_status ENUM(
         'Not reviewed', 'Pending review', 'Reviewed by authorized person'
     ) NOT NULL DEFAULT 'Not reviewed',
-    PRIMARY KEY (child_id, caregiver_id),
+    PRIMARY KEY (child_id, parent_guardian_id),
     FOREIGN KEY (child_id) REFERENCES children(child_id),
-    FOREIGN KEY (caregiver_id) REFERENCES caregivers(caregiver_id)
+    FOREIGN KEY (parent_guardian_id)
+        REFERENCES parents_guardians(parent_guardian_id)
 );
 
 CREATE TABLE IF NOT EXISTS admission_applications (
@@ -56,9 +58,6 @@ CREATE TABLE IF NOT EXISTS admission_applications (
         NOT NULL DEFAULT 'Prefer not to say',
     received_on DATE NOT NULL,
     referral_source VARCHAR(100) NOT NULL,
-    parent_or_guardian_name VARCHAR(100) NOT NULL,
-    parent_guardian_relationship VARCHAR(50) NOT NULL,
-    parent_guardian_contact_reference VARCHAR(50) NOT NULL DEFAULT 'NOT RECORDED',
     status ENUM(
         'Pending review', 'Approved by reviewer', 'Referred', 'Closed'
     ) NOT NULL DEFAULT 'Pending review',
@@ -67,6 +66,17 @@ CREATE TABLE IF NOT EXISTS admission_applications (
     decision_on DATE NULL,
     INDEX idx_applications_status (status),
     INDEX idx_applications_received (received_on)
+);
+
+CREATE TABLE IF NOT EXISTS application_parent_links (
+    application_id INT NOT NULL,
+    parent_guardian_id INT NOT NULL,
+    relationship_to_applicant VARCHAR(50) NOT NULL,
+    PRIMARY KEY (application_id, parent_guardian_id),
+    FOREIGN KEY (application_id) REFERENCES admission_applications(application_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (parent_guardian_id)
+        REFERENCES parents_guardians(parent_guardian_id)
 );
 
 CREATE TABLE IF NOT EXISTS review_criteria (

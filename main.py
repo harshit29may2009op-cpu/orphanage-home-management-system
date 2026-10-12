@@ -1,605 +1,629 @@
-"""Menu-driven Class 12 Python + MySQL orphanage-home project.
-
-Use fictional records only. Admission decisions and policy checks require a human.
-"""
-from datetime import date
-from decimal import Decimal, InvalidOperation
+# Orphanage Home Management System
+# Class 12 Informatics Practices project
 
 import mysql.connector
-
-from charts import generate_charts
-from config import connect_db
-
-
-def ask(prompt, required=True):
-    while True:
-        value = input(prompt).strip()
-        if value or not required:
-            return value
-        print("Please enter a value.")
+import pandas as pd
+import matplotlib.pyplot as plt
+from config import DB_CONFIG
 
 
-def ask_date(prompt):
-    while True:
-        value = ask(prompt + " (YYYY-MM-DD): ")
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            print("Use a valid date such as 2026-10-12.")
-
-
-def ask_integer(prompt, minimum=None, maximum=None):
-    while True:
-        try:
-            value = int(ask(prompt))
-            if minimum is not None and value < minimum:
-                raise ValueError
-            if maximum is not None and value > maximum:
-                raise ValueError
-            return value
-        except ValueError:
-            print("Enter a whole number in the allowed range.")
-
-
-def ask_amount(prompt):
-    while True:
-        try:
-            value = Decimal(ask(prompt))
-            if value <= 0:
-                raise InvalidOperation
-            return value
-        except (InvalidOperation, ValueError):
-            print("Enter an amount greater than zero.")
-
-
-def choose_gender():
-    options = ["Girl", "Boy", "Another identity", "Prefer not to say"]
-    print("Gender is recorded for context and aggregate charts only.")
-    for number, option in enumerate(options, start=1):
-        print(f"  {number}. {option}")
-    return options[ask_integer("Choose: ", 1, len(options)) - 1]
-
-
-def dashboard(connection):
-    cursor = connection.cursor()
-    print("\n=== HOME DASHBOARD ===")
-    for label, table in [
-        ("Children in care", "children"),
-        ("Admission applications", "admission_applications"),
-        ("Donors", "donors"),
-        ("Parents/guardians", "parents_guardians"),
-        ("Active staff", "staff_members"),
-        ("Inventory items", "inventory_items"),
-    ]:
-        cursor.execute(f"SELECT COUNT(*) FROM {table}")
-        print(f"{label}: {cursor.fetchone()[0]}")
-    cursor.execute(
-        "SELECT item_name, quantity_on_hand, reorder_level FROM inventory_items "
-        "WHERE quantity_on_hand <= reorder_level ORDER BY item_name"
+def connect_database():
+    return mysql.connector.connect(
+        host=DB_CONFIG["host"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        database=DB_CONFIG["database"]
     )
-    low_stock = cursor.fetchall()
-    print("Low-stock items:")
-    if low_stock:
-        for name, quantity, reorder in low_stock:
-            print(f"  {name}: {quantity} on hand (reorder at {reorder})")
-    else:
-        print("  None")
-    cursor.close()
 
 
-def add_child(connection):
-    print("\nCreate a child profile only after an authorized human decision.")
-    code = ask("Demo child code: ")
-    name = ask("Display name (use fictional demo data): ")
-    birth = ask_date("Date of birth")
-    gender = choose_gender()
-    admission = ask_date("Admission date")
-    grade = ask("School grade: ", required=False)
-    school = ask("School name: ", required=False)
+def get_rows(query, values=()):
+    connection = connect_database()
     cursor = connection.cursor()
-    cursor.execute(
-        "INSERT INTO children "
-        "(child_code, display_name, date_of_birth, gender, admission_date, school_grade, school_name) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (code, name, birth, gender, admission, grade or None, school or None),
-    )
-    connection.commit()
-    print(f"Saved demo child profile with ID {cursor.lastrowid}.")
-    cursor.close()
-
-
-def search_children(connection):
-    term = ask("Search by child code or display name (blank lists all): ", required=False)
-    cursor = connection.cursor()
-    if term:
-        cursor.execute(
-            "SELECT child_id, child_code, display_name, gender, care_status, school_grade "
-            "FROM children WHERE child_code LIKE %s OR display_name LIKE %s "
-            "ORDER BY child_id LIMIT 100",
-            (f"%{term}%", f"%{term}%"),
-        )
-    else:
-        cursor.execute(
-            "SELECT child_id, child_code, display_name, gender, care_status, school_grade "
-            "FROM children ORDER BY child_id LIMIT 100"
-        )
+    cursor.execute(query, values)
     rows = cursor.fetchall()
-    print("\nID | Code | Display name | Gender | Status | Grade")
-    for row in rows:
-        print(" | ".join(str(value or "-") for value in row))
-    if not rows:
-        print("No matching records.")
     cursor.close()
+    connection.close()
+    return rows
 
 
-def create_application(connection):
-    print("\nNew admission application. Use fictional demo information.")
-    code = ask("Application code: ")
-    applicant = ask("Applicant display name: ")
-    age_text = ask("Age in years (leave blank if not recorded): ", required=False)
-    age = int(age_text) if age_text else None
-    if age is not None and not 0 <= age <= 120:
-        print("Age must be between 0 and 120.")
-        return
-    gender = choose_gender()
-    received = ask_date("Date received")
-    source = ask("Referral source: ")
-    parent_name = ask("Parent or guardian display name (fictional): ")
-    relationship = ask("Relationship to applicant: ")
-    contact_ref = ask("Contact reference (use DEMO ONLY; no real number): ")
+def save_record(query, values=()):
+    connection = connect_database()
     cursor = connection.cursor()
-    cursor.execute(
-        "INSERT INTO parents_guardians (display_name, contact_reference) "
-        "VALUES (%s, %s)",
-        (parent_name, contact_ref),
+    cursor.execute(query, values)
+    connection.commit()
+    cursor.close()
+    connection.close()
+    print("Record saved successfully.")
+
+
+def show_rows(rows):
+    if len(rows) == 0:
+        print("No records found.")
+    else:
+        for row in rows:
+            print(row)
+
+
+def view_children():
+    query = "SELECT child_id, name, age, gender, school_class, admission_date, care_status, adoption_legal_status FROM children ORDER BY child_id"
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def add_child():
+    print("\nAdd a child record")
+    name = input("Child name: ")
+    age = int(input("Age: "))
+    gender = input("Gender (optional): ")
+    school_class = int(input("School class: "))
+    admission_date = input("Admission date (YYYY-MM-DD): ")
+
+    query = """INSERT INTO children
+    (name, age, gender, school_class, admission_date)
+    VALUES (%s, %s, %s, %s, %s)"""
+    values = (name, age, gender, school_class, admission_date)
+    save_record(query, values)
+
+
+def view_guardians():
+    query = "SELECT guardian_id, name, phone, address FROM guardians ORDER BY guardian_id"
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def add_guardian():
+    print("\nAdd a parent or guardian record")
+    name = input("Parent/guardian name: ")
+    phone = input("Contact number or demo contact: ")
+    address = input("Address or area: ")
+
+    query = "INSERT INTO guardians (name, phone, address) VALUES (%s, %s, %s)"
+    values = (name, phone, address)
+    save_record(query, values)
+
+
+def link_guardian():
+    print("\nLink a child with a parent or guardian")
+    child_id = int(input("Child ID: "))
+    guardian_id = int(input("Parent/guardian ID: "))
+    relationship = input("Relationship to child: ")
+
+    query = """INSERT INTO child_guardians
+    (child_id, guardian_id, relationship)
+    VALUES (%s, %s, %s)"""
+    values = (child_id, guardian_id, relationship)
+    save_record(query, values)
+
+
+def view_child_guardians():
+    query = """SELECT children.name, guardians.name, child_guardians.relationship,
+    guardians.phone
+    FROM child_guardians
+    JOIN children ON child_guardians.child_id = children.child_id
+    JOIN guardians ON child_guardians.guardian_id = guardians.guardian_id
+    ORDER BY children.name"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def view_applications():
+    query = """SELECT applications.application_id, applications.applicant_name,
+    applications.age, applications.application_status,
+    application_reviews.decision
+    FROM applications
+    LEFT JOIN application_reviews
+    ON applications.application_id = application_reviews.application_id
+    ORDER BY applications.application_id"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def add_application():
+    print("\nRecord a new admission application")
+    applicant_name = input("Applicant name: ")
+    age = int(input("Age: "))
+    gender = input("Gender (optional): ")
+    guardian_name = input("Parent/guardian name: ")
+    guardian_phone = input("Parent/guardian contact: ")
+    relationship = input("Relationship to applicant: ")
+
+    connection = connect_database()
+    cursor = connection.cursor()
+
+    guardian_query = "INSERT INTO guardians (name, phone, address) VALUES (%s, %s, %s)"
+    cursor.execute(guardian_query, (guardian_name, guardian_phone, "Application record"))
+    guardian_id = cursor.lastrowid
+
+    application_query = """INSERT INTO applications
+    (applicant_name, age, gender, guardian_id, relationship, application_status)
+    VALUES (%s, %s, %s, %s, %s, %s)"""
+    application_values = (
+        applicant_name, age, gender, guardian_id, relationship, "Under Review"
     )
-    parent_id = cursor.lastrowid
-    cursor.execute(
-        "INSERT INTO admission_applications "
-        "(application_code, applicant_display_name, age_years, gender, received_on, "
-        "referral_source) VALUES (%s, %s, %s, %s, %s, %s)",
-        (code, applicant, age, gender, received, source),
-    )
+    cursor.execute(application_query, application_values)
     application_id = cursor.lastrowid
-    cursor.execute(
-        "INSERT INTO application_parent_links "
-        "(application_id, parent_guardian_id, relationship_to_applicant) "
-        "VALUES (%s, %s, %s)",
-        (application_id, parent_id, relationship),
+
+    review_query = """INSERT INTO application_reviews
+    (application_id, care_need_checked, documents_checked,
+    guardian_contacted, decision)
+    VALUES (%s, %s, %s, %s, %s)"""
+    review_values = (
+        application_id, "Not checked", "Not checked",
+        "Not checked", "Pending"
     )
-    cursor.execute(
-        "INSERT INTO application_reviews (application_id, criterion_id) "
-        "SELECT %s, criterion_id FROM review_criteria WHERE is_active = TRUE",
-        (application_id,),
-    )
+    cursor.execute(review_query, review_values)
+
     connection.commit()
-    print(f"Application {code} and separate parent/guardian record saved.")
-    print("The system does not calculate eligibility or make placement decisions.")
     cursor.close()
+    connection.close()
+    print("Application saved. A staff member must review it.")
 
-def list_applications(connection):
+
+def review_application():
+    print("\nUpdate the human review checklist")
+    application_id = int(input("Application ID: "))
+    care_need = input("Care need checked? (Yes/No/Not checked): ")
+    documents = input("Documents checked? (Yes/No/Not checked): ")
+    guardian_contacted = input("Guardian contacted? (Yes/No/Not checked): ")
+    decision = input("Decision by staff (Pending/Eligible/Not eligible): ")
+
+    query = """UPDATE application_reviews
+    SET care_need_checked = %s, documents_checked = %s,
+    guardian_contacted = %s, decision = %s
+    WHERE application_id = %s"""
+    values = (care_need, documents, guardian_contacted, decision, application_id)
+
+    connection = connect_database()
     cursor = connection.cursor()
-    cursor.execute(
-        "SELECT aa.application_id, aa.application_code, aa.applicant_display_name, "
-        "aa.received_on, aa.status, pg.display_name, apl.relationship_to_applicant "
-        "FROM admission_applications aa "
-        "LEFT JOIN application_parent_links apl ON aa.application_id=apl.application_id "
-        "LEFT JOIN parents_guardians pg ON apl.parent_guardian_id=pg.parent_guardian_id "
-        "ORDER BY aa.received_on DESC LIMIT 100"
-    )
-    rows = cursor.fetchall()
-    print("\nID | Code | Applicant | Received | Status | Parent/guardian | Relationship")
-    for row in rows:
-        print(" | ".join(str(value or "-") for value in row))
-    if not rows:
-        print("No applications yet.")
-    cursor.close()
-
-
-def review_application(connection):
-    list_applications(connection)
-    application_id = ask_integer("Application ID to review: ", 1)
-    cursor = connection.cursor()
-    cursor.execute(
-        "SELECT ar.review_id, rc.criterion_name, ar.review_status "
-        "FROM application_reviews ar JOIN review_criteria rc "
-        "ON rc.criterion_id = ar.criterion_id "
-        "WHERE ar.application_id = %s ORDER BY rc.criterion_id",
-        (application_id,),
-    )
-    rows = cursor.fetchall()
-    if not rows:
-        cursor.close()
-        print("Application not found, or checklist is empty.")
-        return
-    print("\nChecklist:")
-    for review_id, criterion, status in rows:
-        print(f"  {review_id}. {criterion} — {status}")
-    valid_review_ids = {row[0] for row in rows}
-    review_id = ask_integer("Checklist item ID to update: ", 1)
-    if review_id not in valid_review_ids:
-        cursor.close()
-        print("That checklist item does not belong to this application.")
-        return
-    status_options = ["Not started", "In review", "Reviewed"]
-    for number, option in enumerate(status_options, start=1):
-        print(f"  {number}. {option}")
-    status = status_options[ask_integer("New checklist status: ", 1, 3) - 1]
-    reviewer = ask("Reviewer display name (demo): ")
-    cursor.execute(
-        "UPDATE application_reviews SET review_status=%s, reviewer_name=%s, "
-        "reviewed_on=%s WHERE review_id=%s AND application_id=%s",
-        (status, reviewer, date.today() if status == "Reviewed" else None,
-         review_id, application_id),
-    )
+    cursor.execute(query, values)
     connection.commit()
-    print("Checklist updated. It records review progress, not an eligibility result.")
-    decision = ask(
-        "Record a human decision now? (leave blank to keep current status): ",
-        required=False,
-    ).lower()
-    if decision in {"y", "yes"}:
-        choices = ["Pending review", "Approved by reviewer", "Referred", "Closed"]
-        for number, option in enumerate(choices, start=1):
-            print(f"  {number}. {option}")
-        new_status = choices[ask_integer("Human decision status: ", 1, 4) - 1]
-        note = ask("Short non-sensitive note: ", required=False)
-        cursor.execute(
-            "UPDATE admission_applications SET status=%s, reviewer_name=%s, "
-            "reviewer_note=%s, decision_on=%s WHERE application_id=%s",
-            (new_status, reviewer, note or None,
-             date.today() if new_status != "Pending review" else None, application_id),
-        )
-        connection.commit()
-        print("Human-entered workflow status saved.")
+    if cursor.rowcount == 0:
+        print("Application review was not found.")
+    else:
+        print("Review checklist updated. The decision was entered by staff.")
     cursor.close()
+    connection.close()
 
 
-def add_donor(connection):
-    code = ask("Demo donor code: ")
-    name = ask("Donor display name (fictional for this project): ")
-    cursor = connection.cursor()
-    cursor.execute(
-        "INSERT INTO donors (donor_code, display_name, contact_reference) "
-        "VALUES (%s, %s, %s)",
-        (code, name, "DEMO ONLY"),
+def view_adoption_applications():
+    query = """SELECT applicant_id, applicant_name, applicant_age, applicant_type,
+    application_status, documents_status, home_study_status, eligibility_status
+    FROM adoptive_applications ORDER BY applicant_id"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def add_adoption_application():
+    print("\nDemo intake form for prospective adoptive parents")
+    applicant_name = input("Applicant name (or lead applicant name for a couple): ")
+    applicant_age = int(input("Applicant age: "))
+    applicant_type = input("Applicant type (Single/Couple): ")
+    marital_status = input("Marital status: ")
+    spouse_consent = input("Spouse consent (Yes/No/Not applicable): ")
+    phone = input("Contact number or demo contact: ")
+    address = input("Residential address or demo area: ")
+    occupation = input("Occupation: ")
+    family_children = int(input("Number of children currently in family: "))
+    submitted_date = input("Date (YYYY-MM-DD): ")
+
+    query = """INSERT INTO adoptive_applications
+    (applicant_name, applicant_age, applicant_type, marital_status,
+    spouse_consent, phone, address, occupation, family_children, submitted_date)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    values = (
+        applicant_name, applicant_age, applicant_type, marital_status,
+        spouse_consent, phone, address, occupation, family_children, submitted_date
     )
+    save_record(query, values)
+    print("This is a school-project intake record, not an official adoption application.")
+    print("Applicants must use the official CARINGS process and authorised agencies.")
+
+
+def review_adoption_application():
+    print("\nRecord checklist results from an authorised review")
+    applicant_id = int(input("Adoption applicant ID: "))
+    documents_status = input("Required documents checked? (Pending/Checked): ")
+    home_study_status = input("Home study report status (Pending/Complete): ")
+    eligibility_status = input(
+        "Official eligibility result (Pending/Verified Eligible/Not Eligible): "
+    )
+    application_status = input(
+        "Application status (Submitted/In Review/Referred/Finalized/Closed): "
+    )
+
+    query = """UPDATE adoptive_applications
+    SET documents_status = %s, home_study_status = %s,
+    eligibility_status = %s, application_status = %s
+    WHERE applicant_id = %s"""
+    values = (
+        documents_status, home_study_status, eligibility_status,
+        application_status, applicant_id
+    )
+
+    connection = connect_database()
+    cursor = connection.cursor()
+    cursor.execute(query, values)
     connection.commit()
-    print(f"Donor saved with ID {cursor.lastrowid}.")
+    if cursor.rowcount == 0:
+        print("Adoption applicant record was not found.")
+    else:
+        print("Checklist saved. The program does not decide eligibility.")
     cursor.close()
+    connection.close()
 
 
-def record_donation(connection):
-    cursor = connection.cursor()
-    cursor.execute("SELECT donor_id, donor_code, display_name FROM donors ORDER BY donor_id")
-    donors = cursor.fetchall()
-    for donor_id, code, name in donors:
-        print(f"{donor_id}. {code} — {name}")
-    if not donors:
-        cursor.close()
-        print("Add a donor first.")
-        return
-    donor_id = ask_integer("Donor ID: ", 1)
-    donated_on = ask_date("Donation date")
-    amount = ask_amount("Amount: ")
-    purpose = ask("Purpose: ")
-    method = ask("Payment method: ")
-    cursor.execute(
-        "INSERT INTO donations (donor_id, donated_on, amount, purpose, payment_method) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (donor_id, donated_on, amount, purpose, method),
+def record_official_child_clearance():
+    child_id = int(input("Child ID: "))
+    decision = input(
+        "Has the CWC officially declared this child legally free for adoption? (Yes/No): "
     )
+    if decision == "Yes":
+        legal_status = "Legally Free for Adoption"
+    else:
+        legal_status = "Not Assessed or Not Declared"
+
+    query = "UPDATE children SET adoption_legal_status = %s WHERE child_id = %s"
+    connection = connect_database()
+    cursor = connection.cursor()
+    cursor.execute(query, (legal_status, child_id))
     connection.commit()
-    print("Donation recorded.")
+    if cursor.rowcount == 0:
+        print("Child record was not found.")
+    else:
+        print("The entered official clearance status was saved.")
     cursor.close()
+    connection.close()
 
 
-def record_expense(connection):
-    spent_on = ask_date("Expense date")
-    category = ask("Category: ")
-    amount = ask_amount("Amount: ")
-    description = ask("Description (no sensitive details): ")
+def record_completed_adoption():
+    print("\nRecord a completed adoption after official approval")
+    applicant_id = int(input("Adoptive applicant ID: "))
+    child_id = int(input("Child ID: "))
+
+    applicant_rows = get_rows(
+        "SELECT eligibility_status FROM adoptive_applications WHERE applicant_id = %s",
+        (applicant_id,)
+    )
+    child_rows = get_rows(
+        "SELECT adoption_legal_status, care_status FROM children WHERE child_id = %s",
+        (child_id,)
+    )
+
+    if len(applicant_rows) == 0:
+        print("Adoptive applicant record was not found.")
+        return
+    if len(child_rows) == 0:
+        print("Child record was not found.")
+        return
+    if applicant_rows[0][0] != "Verified Eligible":
+        print("Record the official eligibility result before continuing.")
+        return
+    if child_rows[0][0] != "Legally Free for Adoption":
+        print("Record official child clearance before continuing.")
+        return
+    if child_rows[0][1] != "In Care":
+        print("This child is not marked as currently in care.")
+        return
+
+    order_date = input("Final adoption order date (YYYY-MM-DD): ")
+    order_reference = input("Fictional or official order reference: ")
+
+    connection = connect_database()
     cursor = connection.cursor()
+    query = """INSERT INTO adoption_cases
+    (child_id, applicant_id, order_date, order_reference)
+    VALUES (%s, %s, %s, %s)"""
+    cursor.execute(query, (child_id, applicant_id, order_date, order_reference))
     cursor.execute(
-        "INSERT INTO expenses (spent_on, category, amount, description) "
-        "VALUES (%s, %s, %s, %s)",
-        (spent_on, category, amount, description),
+        "UPDATE children SET care_status = 'Adopted' WHERE child_id = %s",
+        (child_id,)
     )
-    connection.commit()
-    print("Expense recorded.")
-    cursor.close()
-
-
-def add_education_record(connection):
-    code = ask("Child code: ")
-    academic_year = ask("Academic year (e.g. 2026-27): ")
-    grade = ask("Grade: ")
-    attendance = ask_amount("Attendance percent (use a value above 0): ")
-    result = ask_amount("Result percent (use a value above 0): ")
-    if attendance > 100 or result > 100:
-        print("Percentages must not exceed 100.")
-        return
-    cursor = connection.cursor()
-    cursor.execute("SELECT child_id FROM children WHERE child_code = %s", (code,))
-    row = cursor.fetchone()
-    if not row:
-        cursor.close()
-        print("Child code not found.")
-        return
     cursor.execute(
-        "INSERT INTO education_records "
-        "(child_id, academic_year, school_grade, attendance_percent, result_percent) "
-        "VALUES (%s, %s, %s, %s, %s)",
-        (row[0], academic_year, grade, attendance, result),
-    )
-    connection.commit()
-    print("Education record saved.")
-    cursor.close()
-
-
-def inventory_menu(connection):
-    cursor = connection.cursor()
-    cursor.execute(
-        "SELECT item_id, item_code, item_name, quantity_on_hand, reorder_level, unit_name "
-        "FROM inventory_items ORDER BY item_id"
-    )
-    items = cursor.fetchall()
-    print("\nID | Code | Item | On hand | Reorder at | Unit")
-    for row in items:
-        print(" | ".join(str(value) for value in row))
-    if not items:
-        cursor.close()
-        print("No inventory items. Load demo data first.")
-        return
-    item_id = ask_integer("Item ID to adjust (0 to cancel): ", 0)
-    if item_id == 0:
-        connection.rollback()
-        cursor.close()
-        return
-    cursor.execute(
-        "SELECT quantity_on_hand FROM inventory_items WHERE item_id=%s FOR UPDATE",
-        (item_id,),
-    )
-    row = cursor.fetchone()
-    if not row:
-        connection.rollback()
-        cursor.close()
-        print("Item not found.")
-        return
-    movement = ask("Movement type IN or OUT: ").upper()
-    if movement not in {"IN", "OUT"}:
-        connection.rollback()
-        cursor.close()
-        print("Choose IN or OUT.")
-        return
-    quantity = ask_integer("Quantity: ", 1)
-    current = row[0]
-    if movement == "OUT" and quantity > current:
-        connection.rollback()
-        cursor.close()
-        print("There is not enough stock for that adjustment.")
-        return
-    purpose = ask("Reason: ")
-    cursor.execute(
-        "INSERT INTO inventory_movements "
-        "(item_id, movement_type, quantity, moved_on, purpose) VALUES (%s, %s, %s, %s, %s)",
-        (item_id, movement, quantity, date.today(), purpose),
-    )
-    updated = current + quantity if movement == "IN" else current - quantity
-    cursor.execute(
-        "UPDATE inventory_items SET quantity_on_hand=%s WHERE item_id=%s",
-        (updated, item_id),
+        "UPDATE adoptive_applications SET application_status = 'Finalized' "
+        "WHERE applicant_id = %s",
+        (applicant_id,)
     )
     connection.commit()
     cursor.close()
-    print("Inventory and movement log updated.")
+    connection.close()
+    print("Completed adoption record saved from the entered official order.")
 
 
-def list_staff(connection):
+def view_completed_adoptions():
+    query = """SELECT adoption_cases.adoption_id, children.child_id,
+    adoptive_applications.applicant_id, adoption_cases.order_date,
+    adoption_cases.order_reference
+    FROM adoption_cases
+    JOIN children ON adoption_cases.child_id = children.child_id
+    JOIN adoptive_applications
+    ON adoption_cases.applicant_id = adoptive_applications.applicant_id
+    ORDER BY adoption_cases.order_date"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def view_support_summary():
+    print("This table contains fictional totals only, with no child names or IDs.")
+    query = """SELECT support_category, SUM(child_count)
+    FROM support_summary GROUP BY support_category ORDER BY support_category"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def view_staff():
+    query = "SELECT staff_id, name, job_title, phone, work_status FROM staff ORDER BY staff_id"
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def add_staff():
+    print("\nAdd a staff record")
+    name = input("Staff name: ")
+    job_title = input("Job title: ")
+    phone = input("Contact number or demo contact: ")
+
+    query = """INSERT INTO staff (name, job_title, phone, work_status)
+    VALUES (%s, %s, %s, %s)"""
+    values = (name, job_title, phone, "Active")
+    save_record(query, values)
+
+
+def update_staff_status():
+    staff_id = int(input("Staff ID: "))
+    work_status = input("New status (Active/On Leave/Inactive): ")
+    query = "UPDATE staff SET work_status = %s WHERE staff_id = %s"
+
+    connection = connect_database()
     cursor = connection.cursor()
-    cursor.execute(
-        "SELECT staff_id, staff_code, display_name, role_name, is_active "
-        "FROM staff_members ORDER BY staff_id"
-    )
-    rows = cursor.fetchall()
-    print("\nID | Code | Name | Role | Active")
-    for row in rows:
-        print(" | ".join(str(value) for value in row))
-    if not rows:
-        print("No staff records yet.")
-    cursor.close()
-
-
-def manage_staff(connection):
-    while True:
-        print("\nSTAFF MANAGEMENT: 1 Add  2 List  3 Update role/status  0 Back")
-        choice = ask("Choose: ")
-        if choice == "0":
-            return
-        if choice == "1":
-            code = ask("Staff code: ")
-            name = ask("Staff display name (fictional): ")
-            role = ask("Role: ")
-            cursor = connection.cursor()
-            cursor.execute(
-                "INSERT INTO staff_members (staff_code, display_name, role_name) "
-                "VALUES (%s, %s, %s)",
-                (code, name, role),
-            )
-            connection.commit()
-            print(f"Staff record added with ID {cursor.lastrowid}.")
-            cursor.close()
-        elif choice == "2":
-            list_staff(connection)
-        elif choice == "3":
-            list_staff(connection)
-            staff_id = ask_integer("Staff ID to update: ", 1)
-            role = ask("New role: ")
-            print("  1. Active")
-            print("  2. Inactive")
-            active = ask_integer("Choose status: ", 1, 2) == 1
-            cursor = connection.cursor()
-            cursor.execute(
-                "UPDATE staff_members SET role_name=%s, is_active=%s WHERE staff_id=%s",
-                (role, active, staff_id),
-            )
-            connection.commit()
-            print("Staff record updated." if cursor.rowcount else "Staff ID not found.")
-            cursor.close()
-        else:
-            print("Choose a listed option.")
-
-
-def add_parent_record(connection):
-    name = ask("Parent/guardian display name (fictional): ")
-    contact = ask("Contact reference (use DEMO ONLY; no real number): ")
-    cursor = connection.cursor()
-    cursor.execute(
-        "INSERT INTO parents_guardians (display_name, contact_reference) "
-        "VALUES (%s, %s)",
-        (name, contact),
-    )
+    cursor.execute(query, (work_status, staff_id))
     connection.commit()
-    print(f"Separate parent/guardian record added with ID {cursor.lastrowid}.")
+    if cursor.rowcount == 0:
+        print("Staff record was not found.")
+    else:
+        print("Staff status updated.")
     cursor.close()
+    connection.close()
 
 
-def list_parent_records(connection):
+def add_donation():
+    print("\nRecord a donation")
+    donor_name = input("Donor name or Anonymous: ")
+    donation_date = input("Date (YYYY-MM-DD): ")
+    amount = float(input("Amount in rupees: "))
+    purpose = input("Purpose (general, books, food, etc.): ")
+
+    query = """INSERT INTO donations (donor_name, donation_date, amount, purpose)
+    VALUES (%s, %s, %s, %s)"""
+    values = (donor_name, donation_date, amount, purpose)
+    save_record(query, values)
+
+
+def add_expense():
+    print("\nRecord an expense")
+    expense_date = input("Date (YYYY-MM-DD): ")
+    category = input("Category (food, education, health, etc.): ")
+    amount = float(input("Amount in rupees: "))
+    details = input("Short description: ")
+
+    query = """INSERT INTO expenses (expense_date, category, amount, details)
+    VALUES (%s, %s, %s, %s)"""
+    values = (expense_date, category, amount, details)
+    save_record(query, values)
+
+
+def view_inventory():
+    query = """SELECT item_id, item_name, quantity, reorder_level
+    FROM inventory ORDER BY item_name"""
+    rows = get_rows(query)
+    show_rows(rows)
+
+
+def update_inventory():
+    item_id = int(input("Inventory item ID: "))
+    quantity = int(input("New quantity: "))
+    query = "UPDATE inventory SET quantity = %s WHERE item_id = %s"
+
+    connection = connect_database()
     cursor = connection.cursor()
-    cursor.execute(
-        "SELECT pg.parent_guardian_id, pg.display_name, pg.contact_reference, "
-        "ch.child_code, cpl.relationship_to_child, cpl.authority_review_status "
-        "FROM parents_guardians pg "
-        "LEFT JOIN child_parent_links cpl "
-        "ON pg.parent_guardian_id=cpl.parent_guardian_id "
-        "LEFT JOIN children ch ON cpl.child_id=ch.child_id "
-        "ORDER BY pg.parent_guardian_id, ch.child_code"
-    )
-    rows = cursor.fetchall()
-    print("\nID | Parent/guardian | Contact reference | Child code | Relationship | Review")
-    for row in rows:
-        print(" | ".join(str(value or "-") for value in row))
-    if not rows:
-        print("No parent/guardian records yet.")
-    cursor.close()
-
-
-def link_parent_to_child(connection):
-    code = ask("Child code: ")
-    cursor = connection.cursor()
-    cursor.execute("SELECT child_id FROM children WHERE child_code=%s", (code,))
-    child = cursor.fetchone()
-    if not child:
-        cursor.close()
-        print("Child code not found.")
-        return
-    cursor.execute(
-        "SELECT parent_guardian_id, display_name FROM parents_guardians "
-        "ORDER BY parent_guardian_id"
-    )
-    parents = cursor.fetchall()
-    for parent_id, name in parents:
-        print(f"{parent_id}. {name}")
-    if not parents:
-        cursor.close()
-        print("Add a parent/guardian record first.")
-        return
-    parent_id = ask_integer("Parent/guardian ID: ", 1)
-    relation = ask("Relationship to child: ")
-    statuses = ["Not reviewed", "Pending review", "Reviewed by authorized person"]
-    for number, status in enumerate(statuses, start=1):
-        print(f"  {number}. {status}")
-    review_status = statuses[ask_integer("Authority-review status: ", 1, 3) - 1]
-    cursor.execute(
-        "INSERT INTO child_parent_links "
-        "(child_id, parent_guardian_id, relationship_to_child, authority_review_status) "
-        "VALUES (%s, %s, %s, %s)",
-        (child[0], parent_id, relation, review_status),
-    )
+    cursor.execute(query, (quantity, item_id))
     connection.commit()
+    if cursor.rowcount == 0:
+        print("Inventory item was not found.")
+    else:
+        print("Inventory quantity updated.")
     cursor.close()
-    print("Parent/guardian linked to the child.")
+    connection.close()
 
 
-def manage_parents(connection):
-    while True:
-        print("\nPARENT/GUARDIAN RECORDS: 1 Add  2 List  3 Link to child  0 Back")
-        choice = ask("Choose: ")
-        if choice == "0":
-            return
-        if choice == "1":
-            add_parent_record(connection)
-        elif choice == "2":
-            list_parent_records(connection)
-        elif choice == "3":
-            link_parent_to_child(connection)
-        else:
-            print("Choose a listed option.")
+def make_charts():
+    print("\nCreating charts from the MySQL records.")
+    print("Each chart helps with a different planning question.")
+
+    class_rows = get_rows(
+        "SELECT school_class, COUNT(*) FROM children "
+        "WHERE care_status = 'In Care' GROUP BY school_class ORDER BY school_class"
+    )
+    class_data = pd.DataFrame(class_rows, columns=["Class", "Children"])
+
+    application_rows = get_rows(
+        "SELECT application_status, COUNT(*) FROM applications "
+        "GROUP BY application_status ORDER BY application_status"
+    )
+    application_data = pd.DataFrame(
+        application_rows, columns=["Status", "Applications"]
+    )
+
+    donation_rows = get_rows(
+        "SELECT MONTH(donation_date), SUM(amount) FROM donations "
+        "GROUP BY MONTH(donation_date) ORDER BY MONTH(donation_date)"
+    )
+    donation_data = pd.DataFrame(
+        donation_rows, columns=["MonthNumber", "TotalAmount"]
+    )
+
+    expense_rows = get_rows(
+        "SELECT category, SUM(amount) FROM expenses "
+        "GROUP BY category ORDER BY category"
+    )
+    expense_data = pd.DataFrame(
+        expense_rows, columns=["Category", "TotalAmount"]
+    )
+
+    plt.figure()
+    plt.bar(class_data["Class"], class_data["Children"], color="skyblue")
+    plt.title("Children by School Class")
+    plt.xlabel("School class")
+    plt.ylabel("Number of children")
+
+    plt.figure()
+    plt.bar(application_data["Status"], application_data["Applications"],
+            color="orange")
+    plt.title("Admission Applications by Status")
+    plt.xlabel("Application status")
+    plt.ylabel("Number of applications")
+    plt.xticks(rotation=20)
+
+    month_names = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    donation_months = []
+    for month_number in donation_data["MonthNumber"]:
+        donation_months.append(month_names[month_number - 1])
+
+    plt.figure()
+    plt.plot(donation_months, donation_data["TotalAmount"],
+             marker="o", color="green")
+    plt.title("Donations by Month")
+    plt.xlabel("Month")
+    plt.ylabel("Donation amount in rupees")
+    plt.xticks(rotation=30)
+
+    plt.figure()
+    plt.bar(expense_data["Category"], expense_data["TotalAmount"],
+            color="salmon")
+    plt.title("Expenses by Category")
+    plt.xlabel("Expense category")
+    plt.ylabel("Amount in rupees")
+    plt.xticks(rotation=20)
+
+    adoption_rows = get_rows(
+        "SELECT YEAR(order_date), COUNT(*) FROM adoption_cases "
+        "GROUP BY YEAR(order_date) ORDER BY YEAR(order_date)"
+    )
+    adoption_data = pd.DataFrame(
+        adoption_rows, columns=["Year", "CompletedAdoptions"]
+    )
+
+    support_rows = get_rows(
+        "SELECT support_category, SUM(child_count) FROM support_summary "
+        "GROUP BY support_category ORDER BY support_category"
+    )
+    support_data = pd.DataFrame(
+        support_rows, columns=["SupportCategory", "Children"]
+    )
+
+    plt.figure()
+    plt.bar(adoption_data["Year"], adoption_data["CompletedAdoptions"],
+            color="purple")
+    plt.title("Completed Adoptions by Year")
+    plt.xlabel("Year")
+    plt.ylabel("Number of completed adoptions")
+
+    plt.figure()
+    plt.bar(support_data["SupportCategory"], support_data["Children"],
+            color="teal")
+    plt.title("Separate Child-Support Services: Anonymous Demo Counts")
+    plt.xlabel("Fictional support group")
+    plt.ylabel("Number of cases")
+    plt.xticks(rotation=20)
+
+    plt.show()
 
 
-def main():
-    print("=" * 64)
-    print("ORPHANAGE HOME MANAGEMENT — CLASS 12 DEMONSTRATION")
-    print("Use fictional data only. Do not enter real child or family details.")
-    print("=" * 64)
-    connection = connect_db()
-    try:
-        while True:
-            print(
-                "\n1 Dashboard  2 Add child profile  3 Search/list children"
-                "\n4 Register admission application  5 List applications"
-                "\n6 Review checklist / record human decision"
-                "\n7 Add donor  8 Record donation  9 Record expense"
-                "\n10 Add education record  11 Inventory  12 Generate charts"
-                "\n13 Staff management  14 Parent/guardian records"
-                "\n0 Exit"
-            )
-            choice = ask("Choose an option: ")
-            try:
-                if choice == "1":
-                    dashboard(connection)
-                elif choice == "2":
-                    add_child(connection)
-                elif choice == "3":
-                    search_children(connection)
-                elif choice == "4":
-                    create_application(connection)
-                elif choice == "5":
-                    list_applications(connection)
-                elif choice == "6":
-                    review_application(connection)
-                elif choice == "7":
-                    add_donor(connection)
-                elif choice == "8":
-                    record_donation(connection)
-                elif choice == "9":
-                    record_expense(connection)
-                elif choice == "10":
-                    add_education_record(connection)
-                elif choice == "11":
-                    inventory_menu(connection)
-                elif choice == "12":
-                    for path in generate_charts(connection):
-                        print(f"Created {path}")
-                elif choice == "13":
-                    manage_staff(connection)
-                elif choice == "14":
-                    manage_parents(connection)
-                elif choice == "0":
-                    break
-                else:
-                    print("Choose a listed option.")
-            except (mysql.connector.Error, ValueError) as error:
-                connection.rollback()
-                print(f"Action could not be completed: {error}")
-    finally:
-        connection.close()
-        print("Database connection closed.")
+def show_menu():
+    print("\nORPHANAGE HOME MANAGEMENT SYSTEM")
+    print("1. View children")
+    print("2. Add a child")
+    print("3. View parents and guardians")
+    print("4. Add a parent or guardian")
+    print("5. Link a guardian to a child")
+    print("6. View linked child and guardian records")
+    print("7. View admission applications")
+    print("8. Add an admission application")
+    print("9. Update an application review")
+    print("10. View staff")
+    print("11. Add a staff member")
+    print("12. Update staff work status")
+    print("13. Record a donation")
+    print("14. Record an expense")
+    print("15. View inventory")
+    print("16. Update inventory quantity")
+    print("17. View adoption applications")
+    print("18. Add a prospective adoptive parent application")
+    print("19. Review adoption documents and official eligibility result")
+    print("20. Record official child adoption clearance")
+    print("21. Record completed adoption from an official order")
+    print("22. View completed adoptions")
+    print("23. View anonymous support summary")
+    print("24. Show data charts")
+    print("0. Exit")
 
 
-if __name__ == "__main__":
-    try:
-        main()
-    except (mysql.connector.Error, RuntimeError) as error:
-        print(f"Could not start the project: {error}")
-        print("Check MySQL, the schema import, and your local .env settings.")
+while True:
+    show_menu()
+    choice = input("Enter your choice: ")
+
+    if choice == "1":
+        view_children()
+    elif choice == "2":
+        add_child()
+    elif choice == "3":
+        view_guardians()
+    elif choice == "4":
+        add_guardian()
+    elif choice == "5":
+        link_guardian()
+    elif choice == "6":
+        view_child_guardians()
+    elif choice == "7":
+        view_applications()
+    elif choice == "8":
+        add_application()
+    elif choice == "9":
+        review_application()
+    elif choice == "10":
+        view_staff()
+    elif choice == "11":
+        add_staff()
+    elif choice == "12":
+        update_staff_status()
+    elif choice == "13":
+        add_donation()
+    elif choice == "14":
+        add_expense()
+    elif choice == "15":
+        view_inventory()
+    elif choice == "16":
+        update_inventory()
+    elif choice == "17":
+        view_adoption_applications()
+    elif choice == "18":
+        add_adoption_application()
+    elif choice == "19":
+        review_adoption_application()
+    elif choice == "20":
+        record_official_child_clearance()
+    elif choice == "21":
+        record_completed_adoption()
+    elif choice == "22":
+        view_completed_adoptions()
+    elif choice == "23":
+        view_support_summary()
+    elif choice == "24":
+        make_charts()
+    elif choice == "0":
+        print("Thank you.")
+        break
+    else:
+        print("Please enter a number from the menu.")

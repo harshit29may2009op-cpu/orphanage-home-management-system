@@ -1,167 +1,116 @@
--- Revised Class 12 demo schema. Use fictional records only.
--- Review checklist statuses are workflow tracking, not eligibility decisions.
-CREATE DATABASE IF NOT EXISTS orphanage_class12_demo_v2
-  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE orphanage_class12_demo_v2;
-
-CREATE TABLE IF NOT EXISTS staff_members (
-    staff_id INT AUTO_INCREMENT PRIMARY KEY,
-    staff_code VARCHAR(20) NOT NULL UNIQUE,
-    display_name VARCHAR(100) NOT NULL,
-    role_name VARCHAR(60) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
-);
+-- MySQL setup for the Class 12 project
+CREATE DATABASE IF NOT EXISTS orphanage_class12_demo_v3;
+USE orphanage_class12_demo_v3;
 
 CREATE TABLE IF NOT EXISTS children (
     child_id INT AUTO_INCREMENT PRIMARY KEY,
-    child_code VARCHAR(24) NOT NULL UNIQUE,
-    display_name VARCHAR(80) NOT NULL,
-    date_of_birth DATE NULL,
-    gender ENUM('Girl', 'Boy', 'Another identity', 'Prefer not to say')
-        NOT NULL DEFAULT 'Prefer not to say',
-    admission_date DATE NULL,
-    school_grade VARCHAR(30) NULL,
-    school_name VARCHAR(100) NULL,
-    care_status ENUM('In care', 'Transitioned', 'Archived')
-        NOT NULL DEFAULT 'In care',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_children_status (care_status),
-    INDEX idx_children_gender (gender)
+    name VARCHAR(60) NOT NULL,
+    age INT NOT NULL,
+    gender VARCHAR(20),
+    school_class INT,
+    admission_date DATE,
+    care_status VARCHAR(20) DEFAULT 'In Care',
+    adoption_legal_status VARCHAR(40) DEFAULT 'Not Assessed or Not Declared'
 );
 
--- Parent/guardian details live separately from child and application records.
-CREATE TABLE IF NOT EXISTS parents_guardians (
-    parent_guardian_id INT AUTO_INCREMENT PRIMARY KEY,
-    display_name VARCHAR(100) NOT NULL,
-    contact_reference VARCHAR(50) NOT NULL DEFAULT 'NOT RECORDED'
+CREATE TABLE IF NOT EXISTS guardians (
+    guardian_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(60) NOT NULL,
+    phone VARCHAR(30),
+    address VARCHAR(100)
 );
 
-CREATE TABLE IF NOT EXISTS child_parent_links (
+CREATE TABLE IF NOT EXISTS child_guardians (
+    link_id INT AUTO_INCREMENT PRIMARY KEY,
     child_id INT NOT NULL,
-    parent_guardian_id INT NOT NULL,
-    relationship_to_child VARCHAR(50) NOT NULL,
-    authority_review_status ENUM(
-        'Not reviewed', 'Pending review', 'Reviewed by authorized person'
-    ) NOT NULL DEFAULT 'Not reviewed',
-    PRIMARY KEY (child_id, parent_guardian_id),
+    guardian_id INT NOT NULL,
+    relationship VARCHAR(30),
     FOREIGN KEY (child_id) REFERENCES children(child_id),
-    FOREIGN KEY (parent_guardian_id)
-        REFERENCES parents_guardians(parent_guardian_id)
+    FOREIGN KEY (guardian_id) REFERENCES guardians(guardian_id)
 );
 
-CREATE TABLE IF NOT EXISTS admission_applications (
+CREATE TABLE IF NOT EXISTS applications (
     application_id INT AUTO_INCREMENT PRIMARY KEY,
-    application_code VARCHAR(24) NOT NULL UNIQUE,
-    applicant_display_name VARCHAR(80) NOT NULL,
-    age_years TINYINT UNSIGNED NULL,
-    gender ENUM('Girl', 'Boy', 'Another identity', 'Prefer not to say')
-        NOT NULL DEFAULT 'Prefer not to say',
-    received_on DATE NOT NULL,
-    referral_source VARCHAR(100) NOT NULL,
-    status ENUM(
-        'Pending review', 'Approved by reviewer', 'Referred', 'Closed'
-    ) NOT NULL DEFAULT 'Pending review',
-    reviewer_name VARCHAR(80) NULL,
-    reviewer_note VARCHAR(255) NULL,
-    decision_on DATE NULL,
-    INDEX idx_applications_status (status),
-    INDEX idx_applications_received (received_on)
+    applicant_name VARCHAR(60) NOT NULL,
+    age INT NOT NULL,
+    gender VARCHAR(20),
+    guardian_id INT NOT NULL,
+    relationship VARCHAR(30),
+    application_status VARCHAR(25) DEFAULT 'Under Review',
+    FOREIGN KEY (guardian_id) REFERENCES guardians(guardian_id)
 );
-
-CREATE TABLE IF NOT EXISTS application_parent_links (
-    application_id INT NOT NULL,
-    parent_guardian_id INT NOT NULL,
-    relationship_to_applicant VARCHAR(50) NOT NULL,
-    PRIMARY KEY (application_id, parent_guardian_id),
-    FOREIGN KEY (application_id) REFERENCES admission_applications(application_id)
-        ON DELETE CASCADE,
-    FOREIGN KEY (parent_guardian_id)
-        REFERENCES parents_guardians(parent_guardian_id)
-);
-
-CREATE TABLE IF NOT EXISTS review_criteria (
-    criterion_id INT AUTO_INCREMENT PRIMARY KEY,
-    criterion_code VARCHAR(30) NOT NULL UNIQUE,
-    criterion_name VARCHAR(120) NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE
-);
-
-INSERT IGNORE INTO review_criteria (criterion_code, criterion_name) VALUES
-('REFERRAL', 'Referral information recorded'),
-('FAMILY_CONTEXT', 'Parent or guardian context reviewed'),
-('DOCUMENTS', 'Required documentation checked under the local process'),
-('SAFEGUARDING', 'Safeguarding review completed by an authorized person'),
-('CARE_PLAN', 'Initial care and support needs discussed');
 
 CREATE TABLE IF NOT EXISTS application_reviews (
-    review_id INT AUTO_INCREMENT PRIMARY KEY,
-    application_id INT NOT NULL,
-    criterion_id INT NOT NULL,
-    review_status ENUM('Not started', 'In review', 'Reviewed')
-        NOT NULL DEFAULT 'Not started',
-    reviewer_name VARCHAR(80) NULL,
-    reviewed_on DATE NULL,
-    UNIQUE KEY uq_application_criterion (application_id, criterion_id),
-    FOREIGN KEY (application_id) REFERENCES admission_applications(application_id)
-        ON DELETE CASCADE,
-    FOREIGN KEY (criterion_id) REFERENCES review_criteria(criterion_id)
+    application_id INT PRIMARY KEY,
+    care_need_checked VARCHAR(20) DEFAULT 'Not checked',
+    documents_checked VARCHAR(20) DEFAULT 'Not checked',
+    guardian_contacted VARCHAR(20) DEFAULT 'Not checked',
+    decision VARCHAR(25) DEFAULT 'Pending',
+    FOREIGN KEY (application_id) REFERENCES applications(application_id)
 );
 
-CREATE TABLE IF NOT EXISTS education_records (
-    education_id INT AUTO_INCREMENT PRIMARY KEY,
-    child_id INT NOT NULL,
-    academic_year VARCHAR(20) NOT NULL,
-    school_grade VARCHAR(30) NOT NULL,
-    attendance_percent DECIMAL(5,2) NOT NULL,
-    result_percent DECIMAL(5,2) NOT NULL,
+CREATE TABLE IF NOT EXISTS adoptive_applications (
+    applicant_id INT AUTO_INCREMENT PRIMARY KEY,
+    applicant_name VARCHAR(60) NOT NULL,
+    applicant_age INT NOT NULL,
+    applicant_type VARCHAR(20),
+    marital_status VARCHAR(30),
+    spouse_consent VARCHAR(20),
+    phone VARCHAR(30),
+    address VARCHAR(100),
+    occupation VARCHAR(50),
+    family_children INT,
+    submitted_date DATE,
+    documents_status VARCHAR(20) DEFAULT 'Pending',
+    home_study_status VARCHAR(20) DEFAULT 'Pending',
+    eligibility_status VARCHAR(30) DEFAULT 'Pending',
+    application_status VARCHAR(30) DEFAULT 'Submitted'
+);
+
+CREATE TABLE IF NOT EXISTS adoption_cases (
+    adoption_id INT AUTO_INCREMENT PRIMARY KEY,
+    child_id INT NOT NULL UNIQUE,
+    applicant_id INT NOT NULL,
+    order_date DATE NOT NULL,
+    order_reference VARCHAR(60) NOT NULL,
     FOREIGN KEY (child_id) REFERENCES children(child_id),
-    INDEX idx_education_year (academic_year)
+    FOREIGN KEY (applicant_id) REFERENCES adoptive_applications(applicant_id)
 );
 
-CREATE TABLE IF NOT EXISTS donors (
-    donor_id INT AUTO_INCREMENT PRIMARY KEY,
-    donor_code VARCHAR(24) NOT NULL UNIQUE,
-    display_name VARCHAR(100) NOT NULL,
-    contact_reference VARCHAR(50) NOT NULL DEFAULT 'NOT RECORDED'
+CREATE TABLE IF NOT EXISTS staff (
+    staff_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(60) NOT NULL,
+    job_title VARCHAR(40),
+    phone VARCHAR(30),
+    work_status VARCHAR(20) DEFAULT 'Active'
 );
 
 CREATE TABLE IF NOT EXISTS donations (
     donation_id INT AUTO_INCREMENT PRIMARY KEY,
-    donor_id INT NOT NULL,
-    donated_on DATE NOT NULL,
-    amount DECIMAL(12,2) NOT NULL,
-    purpose VARCHAR(80) NOT NULL,
-    payment_method VARCHAR(30) NOT NULL,
-    FOREIGN KEY (donor_id) REFERENCES donors(donor_id),
-    INDEX idx_donations_date (donated_on)
+    donor_name VARCHAR(60),
+    donation_date DATE NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    purpose VARCHAR(60)
 );
 
 CREATE TABLE IF NOT EXISTS expenses (
     expense_id INT AUTO_INCREMENT PRIMARY KEY,
-    spent_on DATE NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    amount DECIMAL(12,2) NOT NULL,
-    description VARCHAR(160) NOT NULL,
-    INDEX idx_expenses_date (spent_on)
+    expense_date DATE NOT NULL,
+    category VARCHAR(40) NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    details VARCHAR(100)
 );
 
-CREATE TABLE IF NOT EXISTS inventory_items (
+CREATE TABLE IF NOT EXISTS inventory (
     item_id INT AUTO_INCREMENT PRIMARY KEY,
-    item_code VARCHAR(24) NOT NULL UNIQUE,
-    item_name VARCHAR(80) NOT NULL,
-    category VARCHAR(50) NOT NULL,
-    unit_name VARCHAR(20) NOT NULL,
-    quantity_on_hand INT NOT NULL DEFAULT 0,
-    reorder_level INT NOT NULL DEFAULT 0
+    item_name VARCHAR(50) NOT NULL,
+    quantity INT NOT NULL,
+    reorder_level INT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS inventory_movements (
-    movement_id INT AUTO_INCREMENT PRIMARY KEY,
-    item_id INT NOT NULL,
-    movement_type ENUM('IN', 'OUT') NOT NULL,
-    quantity INT NOT NULL,
-    moved_on DATE NOT NULL,
-    purpose VARCHAR(120) NOT NULL,
-    FOREIGN KEY (item_id) REFERENCES inventory_items(item_id),
-    INDEX idx_inventory_moved_on (moved_on)
+-- Aggregate-only fictional data. This table has no child ID or name.
+CREATE TABLE IF NOT EXISTS support_summary (
+    summary_id INT AUTO_INCREMENT PRIMARY KEY,
+    support_category VARCHAR(80) NOT NULL,
+    child_count INT NOT NULL
 );
